@@ -32,6 +32,42 @@ if not BOT_TOKEN:
     raise ValueError("BOT_TOKEN не установлен! Установите переменную окружения BOT_TOKEN.")
 
 
+# --- Предустановленные RSS-каналы ---
+
+PRESET_FEEDS = {
+    "Хабр": {
+        "Все публикации": "https://habr.com/ru/rss/all/all/",
+        "Разработка": "https://habr.com/ru/rss/hub/develop/",
+        "Администрирование": "https://habr.com/ru/rss/hub/admin/",
+        "Дизайн": "https://habr.com/ru/rss/hub/design/",
+        "Менеджмент": "https://habr.com/ru/rss/hub/management/",
+        "Маркетинг": "https://habr.com/ru/rss/hub/marketing/",
+        "Научпоп": "https://habr.com/ru/rss/hub/popsci/",
+    },
+    "Спорт": {
+        "Чемпионат.com": "https://www.championat.com/rss/news.xml",
+        "Спорт-Экспресс": "https://www.sport-express.ru/rss/all.xml",
+        "Спорт Mail.ru": "https://sportmail.ru/rss/all.xml",
+        "Eurosport": "https://www.eurosport.ru/rss.xml",
+        "Футбол России": "https://www.sports.ru/rss/football.xml",
+    },
+    "Путешествия": {
+        "National Geographic Travel": "https://www.nat-geo.ru/travel/rss/",
+        "Вокруг Света": "https://www.vokrugsveta.ru/rss/",
+        "Travel.ru": "https://www.travel.ru/rss/",
+        "Турпром": "https://www.tourprom.ru/rss/",
+        "TripAdvisor": "https://www.tripadvisor.ru/rss/",
+    },
+    "Отдых и Развлечения": {
+        "Кинопоиск": "https://www.kinopoisk.ru/rss/news.xml",
+        "Игромания": "https://www.igromania.ru/rss/news.xml",
+        "Канобу": "https://kanobu.ru/rss/",
+        "Dtf": "https://dtf.ru/rss",
+        "Мир фантастики": "https://www.mirf.ru/rss/",
+    }
+}
+
+
 # Инициализация БД
 def init_db() -> None:
     """Инициализирует базу данных и создает необходимые таблицы."""
@@ -217,10 +253,13 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         return
     await update.message.reply_text(
         "👋 Привет! Я новостной агрегатор.\n\n"
-        "Команды:\n"
+        "📋 **Команды:**\n"
         "/add_feed <url> - Добавить ленту\n"
+        "/presets - Предустановленные каналы\n"
+        "/add_preset <номер> - Добавить канал из списка\n"
         "/list - Мои подписки\n"
-        "/reading_list - Список 'Прочитать позже'"
+        "/reading_list - Список 'Прочитать позже'",
+        parse_mode="Markdown"
     )
 
 
@@ -310,6 +349,124 @@ async def list_feeds(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
     except sqlite3.Error as e:
         logger.error(f"Ошибка при получении списка подписок: {e}")
         await update.message.reply_text("❌ Ошибка при получении списка подписок.")
+
+
+async def show_presets(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Показывает список предустановленных RSS-каналов."""
+    if not update.message:
+        return
+
+    text = "📰 **Предустановленные RSS-каналы:**\n\n"
+    counter = 1
+    preset_list = []
+
+    for category, feeds in PRESET_FEEDS.items():
+        text += f"**{category}:**\n"
+        for feed_name, feed_url in feeds.items():
+            preset_list.append((feed_name, feed_url))
+            text += f"{counter}. {feed_name}\n"
+            counter += 1
+        text += "\n"
+
+    text += f"\n💡 Используйте `/add_preset <номер>` для добавления канала.\n"
+    text += f"Например: `/add_preset 1`"
+
+    # Сохраняем список в контексте для использования в add_preset
+    if context.user_data:
+        context.user_data['preset_list'] = preset_list
+
+    await update.message.reply_text(text, parse_mode="Markdown")
+
+
+async def add_preset(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Добавляет предустановленный канал по номеру."""
+    if not update.message or not update.effective_user:
+        return
+
+    user_id = update.effective_user.id
+
+    if not context.args:
+        await update.message.reply_text(
+            "❌ Используйте: /add_preset <номер>\n\n"
+            "Сначала посмотрите список каналов: /presets"
+        )
+        return
+
+    try:
+        preset_num = int(context.args[0])
+    except ValueError:
+        await update.message.reply_text("❌ Номер должен быть числом. Используйте: /add_preset <номер>")
+        return
+
+    # Получаем список предустановленных каналов
+    if not context.user_data or 'preset_list' not in context.user_data:
+        # Пересоздаем список если его нет
+        preset_list = []
+        for category, feeds in PRESET_FEEDS.items():
+            for feed_name, feed_url in feeds.items():
+                preset_list.append((feed_name, feed_url))
+        if context.user_data:
+            context.user_data['preset_list'] = preset_list
+    else:
+        preset_list = context.user_data.get('preset_list', [])
+    
+    if not preset_list:
+        # Если список все еще пуст, создаем его
+        preset_list = []
+        for category, feeds in PRESET_FEEDS.items():
+            for feed_name, feed_url in feeds.items():
+                preset_list.append((feed_name, feed_url))
+        if context.user_data:
+            context.user_data['preset_list'] = preset_list
+
+    if preset_num < 1 or preset_num > len(preset_list):
+        await update.message.reply_text(
+            f"❌ Неверный номер. Доступны номера от 1 до {len(preset_list)}.\n\n"
+            "Используйте /presets для просмотра списка."
+        )
+        return
+
+    feed_name, feed_url = preset_list[preset_num - 1]
+
+    msg = await update.message.reply_text(f"🔄 Добавляю канал: **{feed_name}**...", parse_mode="Markdown")
+
+    # Используем существующую логику добавления ленты
+    loop = asyncio.get_running_loop()
+    try:
+        feed = await loop.run_in_executor(None, feedparser.parse, feed_url)
+
+        if hasattr(feed, 'bozo') and feed.bozo:
+            logger.warning(f"Ошибка парсинга RSS для {feed_url}: {feed.bozo_exception}")
+
+        feed_title = getattr(feed.feed, 'title', None) if hasattr(feed, 'feed') else None
+        if not feed.entries and not feed_title:
+            await msg.edit_text("❌ Не удалось загрузить RSS-ленту. Попробуйте позже.")
+            return
+
+        title = feed_title or feed_name
+
+        if db_add_subscription(user_id, feed_url):
+            await msg.edit_text(
+                f"✅ Подписка оформлена: **{title}**\n\n"
+                f"Канал: {feed_name}",
+                parse_mode="Markdown"
+            )
+
+            # Инициализируем состояние ленты
+            if feed.entries and len(feed.entries) > 0:
+                first_entry = feed.entries[0]
+                last_entry_id = str(getattr(first_entry, 'id', None) or getattr(first_entry, 'link', ''))
+                if last_entry_id:
+                    db_update_last_entry(feed_url, last_entry_id)
+        else:
+            await msg.edit_text(f"ℹ️ Вы уже подписаны на **{title}**.", parse_mode="Markdown")
+
+    except (ConnectionError, OSError) as e:
+        logger.error(f"Ошибка сети при добавлении предустановленного канала {feed_url}: {e}")
+        await msg.edit_text("❌ Ошибка сети. Попробуйте позже.")
+    except Exception as e:
+        logger.error(f"Ошибка при добавлении предустановленного канала {feed_url}: {e}", exc_info=True)
+        await msg.edit_text(f"❌ Ошибка: {str(e)}")
 
 
 # --- Логика "Прочитать позже" ---
@@ -519,6 +676,8 @@ def main() -> None:
         # Хендлеры команд
         application.add_handler(CommandHandler("start", start))
         application.add_handler(CommandHandler("add_feed", add_feed))
+        application.add_handler(CommandHandler("presets", show_presets))
+        application.add_handler(CommandHandler("add_preset", add_preset))
         application.add_handler(CommandHandler("list", list_feeds))
         application.add_handler(CommandHandler("reading_list", show_reading_list))
 
